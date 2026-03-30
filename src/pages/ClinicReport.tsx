@@ -8,27 +8,32 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { Search, Save, FileText, CheckCircle2 } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Search, Save, FileText, CheckCircle2, UserX, Edit, Trash2, Download, Users, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import PageLayout from '@/components/PageLayout';
 
 const ClinicReport: React.FC = () => {
   const { currentUser } = useAuth();
-  const { getPatientsByClinic, updatePatient, clinics } = useData();
+  const { getPatientsByClinic, updatePatient, deletePatient, clinics } = useData();
   const { toast } = useToast();
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
-  const [searchTicket, setSearchTicket] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [form, setForm] = useState({ diagnosis: '', treatment: '', investigation: '', referral: false, referralNote: '', note: '' });
+  const [showEditDialog, setShowEditDialog] = useState(false);
+  const [editingPatient, setEditingPatient] = useState<any>(null);
 
   const clinic = clinics.find(c => c.id === currentUser?.assignedClinic);
-  const patients = currentUser?.assignedClinic ? getPatientsByClinic(currentUser.assignedClinic) : [];
-  const waitingPatients = patients.filter(p => !p.examined);
-  const examinedPatients = patients.filter(p => p.examined);
-  const selectedPatient = selectedPatientId ? patients.find(p => p.id === selectedPatientId) : null;
+  const allPatients = currentUser?.assignedClinic ? getPatientsByClinic(currentUser.assignedClinic) : [];
+  const waitingPatients = allPatients.filter(p => !p.examined && !p.isAbsent);
+  const examinedPatients = allPatients.filter(p => p.examined);
+  const absentPatients = allPatients.filter(p => p.isAbsent && !p.examined);
+  const selectedPatient = selectedPatientId ? allPatients.find(p => p.id === selectedPatientId) : null;
 
-  const filteredWaiting = searchTicket
-    ? waitingPatients.filter(p => p.ticketNumber.includes(searchTicket) || p.fullNameAr.includes(searchTicket))
-    : waitingPatients;
+  const searchResults = searchQuery
+    ? allPatients.filter(p => p.ticketNumber.includes(searchQuery) || p.fullNameAr.includes(searchQuery))
+    : null;
 
   const handleSave = () => {
     if (!selectedPatientId) return;
@@ -43,60 +48,154 @@ const ClinicReport: React.FC = () => {
       examStudentSignature: currentUser?.fullName,
       examinedAt: new Date().toLocaleString('en-EG', { timeZone: 'Africa/Cairo' }),
       examined: true,
+      isAbsent: false,
     });
     toast({ title: 'Saved', description: 'Examination completed successfully' });
     setSelectedPatientId(null);
     setForm({ diagnosis: '', treatment: '', investigation: '', referral: false, referralNote: '', note: '' });
   };
 
+  const handleMarkAbsent = (id: string) => {
+    updatePatient(id, { isAbsent: true, absentAt: new Date().toISOString() });
+    toast({ title: 'Marked Absent', description: 'Patient moved to absent list' });
+    if (selectedPatientId === id) setSelectedPatientId(null);
+  };
+
+  const handleRestoreAbsent = (id: string) => {
+    updatePatient(id, { isAbsent: false, absentAt: undefined });
+    toast({ title: 'Restored', description: 'Patient returned to waiting list' });
+  };
+
+  const handleEditExamined = (p: any) => {
+    setEditingPatient({ ...p });
+    setShowEditDialog(true);
+  };
+
+  const handleSaveEdit = () => {
+    if (!editingPatient) return;
+    updatePatient(editingPatient.id, {
+      diagnosis: editingPatient.diagnosis,
+      treatment: editingPatient.treatment,
+      investigation: editingPatient.investigation,
+      referral: editingPatient.referral,
+      referralNote: editingPatient.referralNote,
+      examNote: editingPatient.examNote,
+    });
+    toast({ title: 'Updated' });
+    setShowEditDialog(false);
+  };
+
+  const selectAndLoadPatient = (id: string) => {
+    const p = allPatients.find(pt => pt.id === id);
+    setSelectedPatientId(id);
+    if (p?.examined) {
+      setForm({
+        diagnosis: p.diagnosis || '',
+        treatment: p.treatment || '',
+        investigation: p.investigation || '',
+        referral: p.referral || false,
+        referralNote: p.referralNote || '',
+        note: p.examNote || '',
+      });
+    } else {
+      setForm({ diagnosis: '', treatment: '', investigation: '', referral: false, referralNote: '', note: '' });
+    }
+  };
+
   return (
     <PageLayout title={clinic ? `${clinic.nameAr} - ${clinic.name} Clinic` : 'Clinic Report'}>
       {clinic?.doctorName && (
-        <div className="mb-4 text-sm text-muted-foreground">
-          Doctor: <span className="font-semibold text-foreground">{clinic.doctorName}</span>
+        <div className="mb-4 flex items-center justify-between">
+          <div className="text-sm text-muted-foreground">
+            Doctor: <span className="font-semibold text-foreground">{clinic.doctorName}</span>
+          </div>
+          <div className="flex gap-3 text-sm">
+            <Badge variant="outline" className="border-warning text-warning"><Clock className="w-3 h-3 mr-1" />Waiting: {waitingPatients.length}</Badge>
+            <Badge variant="outline" className="border-success text-success"><CheckCircle2 className="w-3 h-3 mr-1" />Examined: {examinedPatients.length}</Badge>
+            <Badge variant="outline"><Users className="w-3 h-3 mr-1" />Total: {allPatients.length}</Badge>
+          </div>
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Patient list */}
         <div className="space-y-4">
-          <div className="flex gap-2">
-            <Input value={searchTicket} onChange={e => setSearchTicket(e.target.value)} placeholder="Search ticket/name..." className="h-9" />
-            <Button size="icon" variant="outline"><Search className="w-4 h-4" /></Button>
-          </div>
+          <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search ticket/name..." className="h-9" />
 
-          <Card className="glass-card">
-            <CardHeader className="pb-2"><CardTitle className="text-sm font-heading">Waiting ({waitingPatients.length})</CardTitle></CardHeader>
-            <CardContent className="max-h-64 overflow-y-auto space-y-1">
-              {filteredWaiting.map(p => (
-                <button key={p.id} onClick={() => { setSelectedPatientId(p.id); setForm({ diagnosis: '', treatment: '', investigation: '', referral: false, referralNote: '', note: '' }); }}
-                  className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedPatientId === p.id ? 'bg-primary/10 border-primary' : 'status-waiting'}`}>
-                  <div className="flex justify-between items-center">
-                    <span className="font-medium text-sm">{p.fullNameAr}</span>
-                    <Badge variant="outline" className="text-xs">{p.ticketNumber}</Badge>
-                  </div>
-                  <p className="text-xs mt-1 opacity-70">{p.mainComplaint}</p>
-                </button>
-              ))}
-              {filteredWaiting.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No patients waiting</p>}
-            </CardContent>
-          </Card>
+          {searchResults ? (
+            <Card className="glass-card">
+              <CardHeader className="pb-2"><CardTitle className="text-sm font-heading">Results ({searchResults.length})</CardTitle></CardHeader>
+              <CardContent className="max-h-96 overflow-y-auto space-y-1">
+                {searchResults.map(p => (
+                  <button key={p.id} onClick={() => selectAndLoadPatient(p.id)}
+                    className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedPatientId === p.id ? 'bg-primary/10 border-primary' : p.examined ? 'status-completed' : 'status-waiting'}`}>
+                    <div className="flex justify-between items-center">
+                      <span className="font-medium text-sm">{p.fullNameAr}</span>
+                      <Badge variant="outline" className="text-xs font-bold">{p.ticketNumber}</Badge>
+                    </div>
+                  </button>
+                ))}
+              </CardContent>
+            </Card>
+          ) : (
+            <>
+              <Card className="glass-card">
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-heading">Waiting ({waitingPatients.length})</CardTitle></CardHeader>
+                <CardContent className="max-h-48 overflow-y-auto space-y-1">
+                  {waitingPatients.map(p => (
+                    <div key={p.id} className={`flex items-center gap-1 rounded-lg border transition-colors ${selectedPatientId === p.id ? 'bg-primary/10 border-primary' : 'status-waiting'}`}>
+                      <button onClick={() => selectAndLoadPatient(p.id)} className="flex-1 text-left p-3">
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium text-sm">{p.fullNameAr}</span>
+                          <Badge variant="outline" className="text-xs font-bold">{p.ticketNumber}</Badge>
+                        </div>
+                        <p className="text-xs mt-1 opacity-70">{p.mainComplaint}</p>
+                      </button>
+                      <Button size="icon" variant="ghost" className="text-destructive mr-1" title="Mark Absent" onClick={() => handleMarkAbsent(p.id)}>
+                        <UserX className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  {waitingPatients.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No patients waiting</p>}
+                </CardContent>
+              </Card>
 
-          <Card className="glass-card">
-            <CardHeader className="pb-2"><CardTitle className="text-sm font-heading">Examined ({examinedPatients.length})</CardTitle></CardHeader>
-            <CardContent className="max-h-64 overflow-y-auto space-y-1">
-              {examinedPatients.map(p => (
-                <button key={p.id} onClick={() => setSelectedPatientId(p.id)}
-                  className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedPatientId === p.id ? 'bg-primary/10 border-primary' : 'status-completed'}`}>
-                  <div className="flex justify-between items-center">
-                    <span className="font-medium text-sm">{p.fullNameAr}</span>
-                    <CheckCircle2 className="w-4 h-4 text-success" />
-                  </div>
-                  <p className="text-xs mt-1 opacity-70">{p.diagnosis}</p>
-                </button>
-              ))}
-            </CardContent>
-          </Card>
+              {absentPatients.length > 0 && (
+                <Card className="glass-card border-destructive/30">
+                  <CardHeader className="pb-2"><CardTitle className="text-sm font-heading text-destructive">Absent ({absentPatients.length})</CardTitle></CardHeader>
+                  <CardContent className="max-h-32 overflow-y-auto space-y-1">
+                    {absentPatients.map(p => (
+                      <div key={p.id} className="flex items-center justify-between p-2 rounded-lg border border-destructive/20 bg-destructive/5">
+                        <div>
+                          <span className="font-medium text-sm">{p.fullNameAr}</span>
+                          <span className="text-xs ml-2 opacity-70">#{p.ticketNumber}</span>
+                        </div>
+                        <Button size="sm" variant="outline" onClick={() => handleRestoreAbsent(p.id)}>Restore</Button>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card className="glass-card">
+                <CardHeader className="pb-2"><CardTitle className="text-sm font-heading">Examined ({examinedPatients.length})</CardTitle></CardHeader>
+                <CardContent className="max-h-48 overflow-y-auto space-y-1">
+                  {examinedPatients.map(p => (
+                    <div key={p.id} className={`flex items-center gap-1 rounded-lg border transition-colors ${selectedPatientId === p.id ? 'bg-primary/10 border-primary' : 'status-completed'}`}>
+                      <button onClick={() => selectAndLoadPatient(p.id)} className="flex-1 text-left p-3">
+                        <div className="flex justify-between items-center">
+                          <span className="font-medium text-sm">{p.fullNameAr}</span>
+                          <CheckCircle2 className="w-4 h-4 text-success" />
+                        </div>
+                        <p className="text-xs mt-1 opacity-70">{p.diagnosis}</p>
+                      </button>
+                      <Button size="icon" variant="ghost" onClick={() => handleEditExamined(p)}><Edit className="w-3 h-3" /></Button>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
 
         {/* Patient details & exam form */}
@@ -106,12 +205,12 @@ const ClinicReport: React.FC = () => {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 font-heading">
                   <FileText className="w-5 h-5 text-primary" />
-                  {selectedPatient.fullNameAr} — {selectedPatient.ticketNumber}
+                  {selectedPatient.fullNameAr} — Ticket #{selectedPatient.ticketNumber}
                   {selectedPatient.examined && <Badge className="bg-success text-success-foreground ml-2">Examined</Badge>}
+                  {selectedPatient.isAbsent && <Badge variant="destructive" className="ml-2">Absent</Badge>}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Patient info */}
                 <div className="bg-muted/50 rounded-lg p-4 grid grid-cols-2 gap-2 text-sm">
                   <div><span className="text-muted-foreground">Complaint:</span> <span className="font-medium">{selectedPatient.mainComplaint}</span></div>
                   <div><span className="text-muted-foreground">Age:</span> <span className="font-medium">{selectedPatient.age}</span></div>
@@ -120,7 +219,6 @@ const ClinicReport: React.FC = () => {
                   {selectedPatient.note && <div className="col-span-2"><span className="text-muted-foreground">Note:</span> <span className="font-medium">{selectedPatient.note}</span></div>}
                 </div>
 
-                {/* Vitals if available */}
                 {selectedPatient.vitalsCompleted && (
                   <div className="bg-accent/10 rounded-lg p-4 text-sm">
                     <h4 className="font-semibold mb-2 text-foreground">Vital Signs</h4>
@@ -133,7 +231,6 @@ const ClinicReport: React.FC = () => {
                   </div>
                 )}
 
-                {/* Examination form */}
                 {!selectedPatient.examined ? (
                   <>
                     <div className="space-y-2">
@@ -194,6 +291,32 @@ const ClinicReport: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Edit examined patient dialog */}
+      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Edit Examination — {editingPatient?.fullNameAr}</DialogTitle></DialogHeader>
+          {editingPatient && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label>Diagnosis</Label>
+                <Textarea value={editingPatient.diagnosis || ''} onChange={e => setEditingPatient({ ...editingPatient, diagnosis: e.target.value })} dir="rtl" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Treatment</Label>
+                <Textarea value={editingPatient.treatment || ''} onChange={e => setEditingPatient({ ...editingPatient, treatment: e.target.value })} dir="rtl" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Investigation</Label>
+                <Textarea value={editingPatient.investigation || ''} onChange={e => setEditingPatient({ ...editingPatient, investigation: e.target.value })} dir="rtl" />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={handleSaveEdit}>Save Changes</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </PageLayout>
   );
 };

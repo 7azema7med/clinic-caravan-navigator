@@ -9,6 +9,7 @@ interface AuthContextType {
   register: (user: Omit<User, 'id' | 'role'>) => boolean;
   setAssignment: (assignment: StudentAssignment, clinicId?: string) => void;
   updateUser: (userId: string, updates: Partial<User>) => void;
+  updateProfile: (updates: Partial<User>) => void;
   deleteUser: (userId: string) => void;
   getAllUsers: () => User[];
   sessionStart: string | null;
@@ -101,6 +102,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [currentUser]);
 
+  const updateProfile = useCallback((updates: Partial<User>) => {
+    if (!currentUser) return;
+    const updated = { ...currentUser, ...updates };
+    setCurrentUser(updated);
+    setUsers(prev => prev.map(u => u.id === currentUser.id ? updated : u));
+  }, [currentUser]);
+
   const deleteUser = useCallback((userId: string) => {
     setUsers(prev => prev.filter(u => u.id !== userId));
   }, []);
@@ -108,7 +116,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const getAllUsers = useCallback(() => users, [users]);
 
   return (
-    <AuthContext.Provider value={{ currentUser, users, login, logout, register, setAssignment, updateUser, deleteUser, getAllUsers, sessionStart }}>
+    <AuthContext.Provider value={{ currentUser, users, login, logout, register, setAssignment, updateUser, updateProfile, deleteUser, getAllUsers, sessionStart }}>
       {children}
     </AuthContext.Provider>
   );

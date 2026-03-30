@@ -1,12 +1,14 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { Patient, Clinic, SystemSettings, DEFAULT_VITAL_RANGES, DEFAULT_CLINICS } from '@/lib/types';
+import { Patient, Clinic, SystemSettings, DEFAULT_VITAL_RANGES, DEFAULT_CLINICS, SwitchRequest } from '@/lib/types';
 
 interface DataContextType {
   patients: Patient[];
   clinics: Clinic[];
   settings: SystemSettings;
+  switchRequests: SwitchRequest[];
   addPatient: (patient: Omit<Patient, 'id' | 'ticketNumber'>) => Patient;
   updatePatient: (id: string, updates: Partial<Patient>) => void;
+  deletePatient: (id: string) => void;
   getPatientByTicket: (ticket: string) => Patient | undefined;
   getPatientsByClinic: (clinicId: string) => Patient[];
   addClinic: (clinic: Omit<Clinic, 'id'>) => void;
@@ -14,7 +16,10 @@ interface DataContextType {
   deleteClinic: (id: string) => void;
   updateSettings: (updates: Partial<SystemSettings>) => void;
   getNextTicketNumber: () => string;
-  getClinicStats: () => { clinicId: string; clinicName: string; waiting: number; examined: number; total: number }[];
+  getClinicStats: () => { clinicId: string; clinicName: string; waiting: number; examined: number; absent: number; total: number }[];
+  searchPatients: (query: string) => Patient[];
+  addSwitchRequest: (req: Omit<SwitchRequest, 'id' | 'status' | 'createdAt'>) => void;
+  updateSwitchRequest: (id: string, status: 'accepted' | 'rejected') => void;
 }
 
 const DataContext = createContext<DataContextType | null>(null);
@@ -49,16 +54,19 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return saved ? JSON.parse(saved) : DEFAULT_SETTINGS;
   });
 
+  const [switchRequests, setSwitchRequests] = useState<SwitchRequest[]>(() => {
+    const saved = localStorage.getItem('clinic_switch_requests');
+    return saved ? JSON.parse(saved) : [];
+  });
+
   useEffect(() => { localStorage.setItem('clinic_patients', JSON.stringify(patients)); }, [patients]);
   useEffect(() => { localStorage.setItem('clinic_clinics', JSON.stringify(clinics)); }, [clinics]);
   useEffect(() => { localStorage.setItem('clinic_settings', JSON.stringify(settings)); }, [settings]);
+  useEffect(() => { localStorage.setItem('clinic_switch_requests', JSON.stringify(switchRequests)); }, [switchRequests]);
 
   const getNextTicketNumber = useCallback((): string => {
-    const today = new Date();
-    const dateStr = `${today.getFullYear()}${String(today.getMonth() + 1).padStart(2, '0')}${String(today.getDate()).padStart(2, '0')}`;
-    const todaysPatients = patients.filter(p => p.ticketNumber.startsWith(dateStr));
-    const nextNum = todaysPatients.length + 1;
-    return `${dateStr}-${String(nextNum).padStart(4, '0')}`;
+    const nextNum = patients.length + 1;
+    return String(nextNum).padStart(4, '0');
   }, [patients]);
 
   const addPatient = useCallback((patientData: Omit<Patient, 'id' | 'ticketNumber'>): Patient => {
@@ -72,12 +80,16 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setPatients(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
   }, []);
 
+  const deletePatient = useCallback((id: string) => {
+    setPatients(prev => prev.filter(p => p.id !== id));
+  }, []);
+
   const getPatientByTicket = useCallback((ticket: string) => {
     return patients.find(p => p.ticketNumber === ticket);
   }, [patients]);
 
   const getPatientsByClinic = useCallback((clinicId: string) => {
-    return patients.filter(p => p.clinicId === clinicId).sort((a, b) => 
+    return patients.filter(p => p.clinicId === clinicId).sort((a, b) =>
       new Date(a.registeredAt).getTime() - new Date(b.registeredAt).getTime()
     );
   }, [patients]);
@@ -98,21 +110,46 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSettings(prev => ({ ...prev, ...updates }));
   }, []);
 
+  const searchPatients = useCallback((query: string) => {
+    if (!query) return patients;
+    const q = query.toLowerCase();
+    return patients.filter(p =>
+      p.ticketNumber.includes(q) ||
+      p.fullNameAr.includes(query) ||
+      p.fullNameAr.toLowerCase().includes(q)
+    );
+  }, [patients]);
+
   const getClinicStats = useCallback(() => {
     return clinics.filter(c => c.isActive).map(clinic => {
       const clinicPatients = patients.filter(p => p.clinicId === clinic.id);
       return {
         clinicId: clinic.id,
         clinicName: `${clinic.nameAr} - ${clinic.name}`,
-        waiting: clinicPatients.filter(p => !p.examined).length,
+        waiting: clinicPatients.filter(p => !p.examined && !p.isAbsent).length,
         examined: clinicPatients.filter(p => p.examined).length,
+        absent: clinicPatients.filter(p => p.isAbsent).length,
         total: clinicPatients.length,
       };
     });
   }, [clinics, patients]);
 
+  const addSwitchRequest = useCallback((req: Omit<SwitchRequest, 'id' | 'status' | 'createdAt'>) => {
+    const newReq: SwitchRequest = {
+      ...req,
+      id: crypto.randomUUID(),
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    };
+    setSwitchRequests(prev => [...prev, newReq]);
+  }, []);
+
+  const updateSwitchRequest = useCallback((id: string, status: 'accepted' | 'rejected') => {
+    setSwitchRequests(prev => prev.map(r => r.id === id ? { ...r, status } : r));
+  }, []);
+
   return (
-    <DataContext.Provider value={{ patients, clinics, settings, addPatient, updatePatient, getPatientByTicket, getPatientsByClinic, addClinic, updateClinic, deleteClinic, updateSettings, getNextTicketNumber, getClinicStats }}>
+    <DataContext.Provider value={{ patients, clinics, settings, switchRequests, addPatient, updatePatient, deletePatient, getPatientByTicket, getPatientsByClinic, addClinic, updateClinic, deleteClinic, updateSettings, getNextTicketNumber, getClinicStats, searchPatients, addSwitchRequest, updateSwitchRequest }}>
       {children}
     </DataContext.Provider>
   );

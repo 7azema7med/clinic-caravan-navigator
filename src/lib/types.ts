@@ -1,6 +1,20 @@
 export type UserRole = 'student' | 'admin';
 export type StudentAssignment = 'registration' | 'vitals' | 'clinic' | 'research';
 
+export interface SwitchRequest {
+  id: string;
+  fromUserId: string;
+  fromUserName: string;
+  fromAssignment: StudentAssignment;
+  fromClinicId?: string;
+  toUserId: string;
+  toUserName: string;
+  toAssignment: StudentAssignment;
+  toClinicId?: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: string;
+}
+
 export interface User {
   id: string;
   username: string;
@@ -60,6 +74,10 @@ export interface Patient {
   doctorSignature?: string;
   examStudentSignature?: string;
   examinedAt?: string;
+
+  // Absent
+  isAbsent?: boolean;
+  absentAt?: string;
 }
 
 export interface VitalRanges {

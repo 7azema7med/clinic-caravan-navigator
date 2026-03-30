@@ -7,7 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Search, Save, HeartPulse } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Search, Save, HeartPulse, CheckCircle2, Edit } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { VitalRanges } from '@/lib/types';
 import PageLayout from '@/components/PageLayout';
@@ -37,19 +38,23 @@ const getPulseStatus = (val: number, ranges: VitalRanges) => {
 
 const VitalSigns: React.FC = () => {
   const { currentUser } = useAuth();
-  const { getPatientByTicket, updatePatient, settings, patients } = useData();
+  const { updatePatient, settings, patients, searchPatients } = useData();
   const { toast } = useToast();
-  const [searchTicket, setSearchTicket] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [form, setForm] = useState({ systolic: '', diastolic: '', sugar: '', pulse: '', pastHistory: '', note: '' });
 
-  const referredPatients = patients.filter(p => p.referToVitals && !p.vitalsCompleted);
+  const referredPatients = patients.filter(p => p.referToVitals);
+  const waitingVitals = referredPatients.filter(p => !p.vitalsCompleted);
+  const completedVitals = referredPatients.filter(p => p.vitalsCompleted);
   const selectedPatient = selectedPatientId ? patients.find(p => p.id === selectedPatientId) : null;
 
-  const handleSearch = () => {
-    const p = getPatientByTicket(searchTicket);
+  const filteredPatients = searchQuery ? searchPatients(searchQuery).filter(p => p.referToVitals) : referredPatients;
+
+  const handleSelectPatient = (id: string) => {
+    const p = patients.find(pt => pt.id === id);
+    setSelectedPatientId(id);
     if (p) {
-      setSelectedPatientId(p.id);
       setForm({
         systolic: p.bloodPressureSystolic?.toString() || '',
         diastolic: p.bloodPressureDiastolic?.toString() || '',
@@ -58,8 +63,6 @@ const VitalSigns: React.FC = () => {
         pastHistory: p.pastHistory || '',
         note: p.vitalsNote || '',
       });
-    } else {
-      toast({ title: 'Not found', description: 'No patient with this ticket number', variant: 'destructive' });
     }
   };
 
@@ -78,7 +81,6 @@ const VitalSigns: React.FC = () => {
     });
     toast({ title: 'Saved', description: 'Vital signs recorded successfully' });
     setSelectedPatientId(null);
-    setSearchTicket('');
     setForm({ systolic: '', diastolic: '', sugar: '', pulse: '', pastHistory: '', note: '' });
   };
 
@@ -90,31 +92,48 @@ const VitalSigns: React.FC = () => {
   return (
     <PageLayout title="Vital Signs Data">
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: search & waiting list */}
+        {/* Left: search & patient list */}
         <div className="space-y-4">
           <Card className="glass-card">
             <CardHeader><CardTitle className="text-sm font-heading">Search Patient</CardTitle></CardHeader>
             <CardContent>
-              <div className="flex gap-2">
-                <Input value={searchTicket} onChange={e => setSearchTicket(e.target.value)} placeholder="Ticket number" className="h-10" onKeyDown={e => e.key === 'Enter' && handleSearch()} />
-                <Button size="icon" onClick={handleSearch}><Search className="w-4 h-4" /></Button>
-              </div>
+              <Input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search by ticket or name..." className="h-10" />
             </CardContent>
           </Card>
+
           <Card className="glass-card">
-            <CardHeader><CardTitle className="text-sm font-heading">Referred Patients ({referredPatients.length})</CardTitle></CardHeader>
-            <CardContent className="max-h-96 overflow-y-auto space-y-2">
-              {referredPatients.map(p => (
-                <button key={p.id} onClick={() => { setSelectedPatientId(p.id); setForm({ systolic: '', diastolic: '', sugar: '', pulse: '', pastHistory: '', note: '' }); }}
-                  className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedPatientId === p.id ? 'bg-primary/10 border-primary' : 'hover:bg-muted border-border'}`}>
+            <CardHeader><CardTitle className="text-sm font-heading">Waiting ({waitingVitals.length})</CardTitle></CardHeader>
+            <CardContent className="max-h-48 overflow-y-auto space-y-1">
+              {(searchQuery ? filteredPatients.filter(p => !p.vitalsCompleted) : waitingVitals).map(p => (
+                <button key={p.id} onClick={() => handleSelectPatient(p.id)}
+                  className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedPatientId === p.id ? 'bg-primary/10 border-primary' : 'status-waiting'}`}>
                   <div className="flex justify-between items-center">
-                    <span className="font-medium text-sm text-foreground">{p.fullNameAr}</span>
-                    <Badge variant="outline" className="text-xs">{p.ticketNumber}</Badge>
+                    <span className="font-medium text-sm">{p.fullNameAr}</span>
+                    <Badge variant="outline" className="text-xs font-bold">{p.ticketNumber}</Badge>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1">{p.clinicName}</p>
+                  <p className="text-xs mt-1 opacity-70">{p.clinicName}</p>
                 </button>
               ))}
-              {referredPatients.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No patients waiting</p>}
+              {waitingVitals.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No patients waiting</p>}
+            </CardContent>
+          </Card>
+
+          <Card className="glass-card">
+            <CardHeader><CardTitle className="text-sm font-heading">Completed ({completedVitals.length})</CardTitle></CardHeader>
+            <CardContent className="max-h-48 overflow-y-auto space-y-1">
+              {(searchQuery ? filteredPatients.filter(p => p.vitalsCompleted) : completedVitals).map(p => (
+                <button key={p.id} onClick={() => handleSelectPatient(p.id)}
+                  className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedPatientId === p.id ? 'bg-primary/10 border-primary' : 'status-completed'}`}>
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium text-sm">{p.fullNameAr}</span>
+                    <div className="flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-success" />
+                      <Badge variant="outline" className="text-xs font-bold">{p.ticketNumber}</Badge>
+                    </div>
+                  </div>
+                  <p className="text-xs mt-1 opacity-70">{p.clinicName}</p>
+                </button>
+              ))}
             </CardContent>
           </Card>
         </div>
@@ -126,7 +145,8 @@ const VitalSigns: React.FC = () => {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 font-heading">
                   <HeartPulse className="w-5 h-5 text-accent" />
-                  {selectedPatient.fullNameAr} — {selectedPatient.ticketNumber}
+                  {selectedPatient.fullNameAr} — Ticket #{selectedPatient.ticketNumber}
+                  {selectedPatient.vitalsCompleted && <Badge className="bg-success text-success-foreground ml-2">Completed</Badge>}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -183,7 +203,7 @@ const VitalSigns: React.FC = () => {
                 <div className="text-sm text-muted-foreground">Student: {currentUser?.fullName}</div>
 
                 <Button onClick={handleSave} className="w-full h-11 font-semibold">
-                  <Save className="w-4 h-4 mr-2" /> Save Vital Signs
+                  <Save className="w-4 h-4 mr-2" /> {selectedPatient.vitalsCompleted ? 'Update' : 'Save'} Vital Signs
                 </Button>
               </CardContent>
             </Card>
@@ -191,7 +211,7 @@ const VitalSigns: React.FC = () => {
             <Card className="glass-card">
               <CardContent className="p-12 text-center text-muted-foreground">
                 <HeartPulse className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                <p>Select a patient from the list or search by ticket number</p>
+                <p>Select a patient from the list or search by ticket number/name</p>
               </CardContent>
             </Card>
           )}
